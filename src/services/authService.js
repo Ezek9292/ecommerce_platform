@@ -5,6 +5,12 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET = process.env.JWT_SECRET
 const SALT_ROUNDS = 10;
 
+const createHttpError = (status, message) => {
+    const error = new Error(message);
+    error.status = status;
+    return error;
+};
+
 export const registerUser = async ({ name, email, password }) => {
     if (!name || !email || !password) {
         throw new Error("All fields are required");
@@ -44,4 +50,36 @@ export const loginUser = async ({ email, password }) => {
 
     // Return `name` to match the Prisma User model.
     return { token, user: { id: user.id, name: user.name, email: user.email, role: user.role } };
-}
+};
+
+export const registerAdmin = async ({ name, email, password }) => {
+    if (!name || !email || !password) {
+        throw createHttpError(400, "All fields are required");
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+        throw createHttpError(409, "User already exists");
+    }
+
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
+    // Dedicated admin onboarding path with explicit ADMIN role.
+    const adminUser = await prisma.user.create({
+        data: { name, email, password: hashedPassword, role: "ADMIN" },
+        select: { id: true, name: true, email: true, role: true }
+    });
+
+    return adminUser;
+};
+
+export const loginAdmin = async (credentials) => {
+    const result = await loginUser(credentials);
+
+    // Admin login endpoint should only issue success for ADMIN accounts.
+    if (result.user.role !== "ADMIN") {
+        throw createHttpError(403, "Forbidden: admin access required");
+    }
+
+    return result;
+};
